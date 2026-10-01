@@ -4,5 +4,4 @@ dist
 .git
 docs
 *.md
-scripts
 test

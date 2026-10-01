@@ -5,6 +5,7 @@ const { compileReceiptRegex, parseReceiptFilename, DEFAULT_RECEIPT_FILENAME_REGE
 const { ReceiptEmailTemplate } = require('../dist/mail/receipt-email.template');
 const { SftpSession } = require('../dist/sftp/sftp.service');
 const { DbService } = require('../dist/db/db.service');
+const { buildRunReport } = require('../dist/receipts/report.template');
 
 test('nombre de archivo: extrae el código y rechaza lo demás', () => {
   const re = compileReceiptRegex(DEFAULT_RECEIPT_FILENAME_REGEX);
@@ -72,4 +73,26 @@ test('BD: se configura por partes (host, puerto, usuario, contraseña) o por DAT
   assert.throws(() => new DbService(config({ DATABASE_URL: undefined, DB_USER: undefined, DB_NAME: undefined })), /DB_USER/);
   await parts.pool.end(); await url.pool.end();
   config({ DB_HOST: undefined, DB_PORT: undefined, DB_USER: undefined, DB_PASSWORD: undefined, DB_NAME: undefined, DATABASE_URL: undefined });
+});
+
+test('reporte: nombres de empleados, secciones, escape de HTML y correo omitible', () => {
+  const row = (o) => ({ id: '1', file_name: 'Recibo de pago 1.pdf', employee_code: '1', employee_name: 'Ana', to_email: 'ana@x.com', status: 'sent', verified: true, error: null, ...o });
+  const rows = [
+    row({ employee_name: 'Ana <script>x</script>' }),
+    row({ id: '2', employee_name: 'Luis', employee_code: '2', to_email: 'luis@x.com', verified: false }),
+    row({ id: '3', employee_name: null, employee_code: '3', to_email: null, status: 'failed', error: 'no encontrado <b>' }),
+    row({ id: '4', employee_name: 'Eva', employee_code: '4', status: 'sending' }),
+  ];
+  const base = { runId: 'r1', title: 'Reporte', startedAt: new Date('2026-10-01T14:00:00Z'), finishedAt: new Date('2026-10-01T14:05:00Z'), timeZone: 'America/Mexico_City',
+    counters: { skippedAlreadySent: 3, ignoredNames: ['a&b.txt'], unrecorded: [{ file: 'x.pdf', error: 'excede' }] }, rows, includeEmail: true };
+  const r = buildRunReport(base);
+  assert.match(r.subject, /^Reporte .*: 2 enviados, 3 con problemas$/);
+  assert.ok(r.html.includes('Ana &lt;script&gt;x&lt;/script&gt;') && !r.html.includes('<script>'), 'escapa HTML');
+  assert.ok(r.html.includes('Luis') && r.html.includes('luis@x.com') && r.html.includes('Por revisar') && r.html.includes('Eva'));
+  assert.ok(r.html.includes('no encontrado &lt;b&gt;') && r.html.includes('x.pdf') && r.html.includes('a&amp;b.txt'));
+  assert.ok(r.text.includes('Ana <script>x</script> [1]') && r.text.includes('Luis') && r.text.includes('POR REVISAR'));
+  const sinCorreo = buildRunReport({ ...base, includeEmail: false });
+  assert.ok(!sinCorreo.html.includes('luis@x.com') && !sinCorreo.text.includes('luis@x.com'));
+  assert.ok(buildRunReport({ ...base, counters: { fatalError: 'API caída' } }).html.includes('La ejecución se detuvo'));
+  assert.equal(buildRunReport({ ...base, rows: [row({})], counters: {} }).subject.includes('con problemas'), false);
 });

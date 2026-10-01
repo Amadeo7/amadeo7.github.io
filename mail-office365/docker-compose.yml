@@ -33,5 +33,15 @@ services:
       interval: 5s
       retries: 10
 
+  # Servidor Temporal de DESARROLLO (SQLite en memoria; en producción usa un cluster o Temporal Cloud).
+  # Actívalo con: docker compose --profile temporal up   y en .env: TEMPORAL_ENABLED=true TEMPORAL_ADDRESS=temporal:7233
+  temporal:
+    profiles: ["temporal"]
+    image: temporalio/temporal:${TEMPORAL_VERSION:-latest}
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--headless"]
+    ports:
+      - "${TEMPORAL_UI_PORT:-8233}:8233"
+      - "7233:7233"
+
 volumes:
   pgdata:

@@ -4,30 +4,49 @@ import { Pool } from 'pg';
 
 const schema = (t: string) => `
 CREATE TABLE IF NOT EXISTS ${t} (
-  id                BIGSERIAL PRIMARY KEY,
-  file_name         TEXT        NOT NULL,
-  file_sha256       TEXT        NOT NULL,
-  employee_code     TEXT,
-  employee_name     TEXT,
-  to_email          TEXT,
-  status            TEXT        NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'sent', 'failed')),
-  attempts          INTEGER     NOT NULL DEFAULT 0,
-  message_id        TEXT,
-  sent_at           TIMESTAMPTZ,
-  verified          BOOLEAN     NOT NULL DEFAULT FALSE,
-  verified_at       TIMESTAMPTZ,
-  verify_attempts   INTEGER     NOT NULL DEFAULT 0,
-  verification_note TEXT,
-  error             TEXT,
-  processed_path    TEXT,
-  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id                  BIGSERIAL PRIMARY KEY,
+  file_name           TEXT        NOT NULL,
+  file_sha256         TEXT        NOT NULL,
+  employee_code       TEXT,
+  employee_name       TEXT,
+  to_email            TEXT,
+  status              TEXT        NOT NULL DEFAULT 'pending',
+  attempts            INTEGER     NOT NULL DEFAULT 0,
+  message_id          TEXT,
+  sent_at             TIMESTAMPTZ,
+  verified            BOOLEAN     NOT NULL DEFAULT FALSE,
+  verified_at         TIMESTAMPTZ,
+  verify_attempts     INTEGER     NOT NULL DEFAULT 0,
+  verification_note   TEXT,
+  error               TEXT,
+  processed_path      TEXT,
+  run_id              TEXT,
+  attempt_started_at  TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (file_name, file_sha256)
 );
 ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS processed_path TEXT;
+ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS run_id TEXT;
+ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS attempt_started_at TIMESTAMPTZ;
+-- pending: creado | sending: enviando (si queda así tras un fallo, el resultado es incierto)
+-- sent: enviado | failed: falló, se reintenta | uncertain: no se sabe si salió; requiere revisión
+ALTER TABLE ${t} DROP CONSTRAINT IF EXISTS ${t}_status_check;
+ALTER TABLE ${t} ADD CONSTRAINT ${t}_status_check CHECK (status IN ('pending', 'sending', 'sent', 'failed', 'uncertain'));
 CREATE INDEX IF NOT EXISTS ${t}_status_idx ON ${t} (status, verified);
 CREATE INDEX IF NOT EXISTS ${t}_employee_idx ON ${t} (employee_code);
+CREATE INDEX IF NOT EXISTS ${t}_run_idx ON ${t} (run_id);
+
+CREATE TABLE IF NOT EXISTS ${t}_runs (
+  run_id            TEXT PRIMARY KEY,
+  status            TEXT        NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'completed', 'aborted')),
+  started_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at       TIMESTAMPTZ,
+  summary           JSONB       NOT NULL DEFAULT '{}'::jsonb,
+  report_sent_at    TIMESTAMPTZ,
+  report_message_id TEXT,
+  report_error      TEXT
+);
 `;
 
 @Injectable()
@@ -39,8 +58,8 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
 
   constructor(config: ConfigService) {
     this.table = config.get<string>('DB_TABLE', 'receipt_emails');
-    if (!/^[a-z_][a-z0-9_]{0,62}$/.test(this.table)) {
-      throw new Error('DB_TABLE solo admite minúsculas, dígitos y guion bajo (máx. 63 caracteres)');
+    if (!/^[a-z_][a-z0-9_]{0,56}$/.test(this.table)) {
+      throw new Error('DB_TABLE solo admite minúsculas, dígitos y guion bajo (máx. 57 caracteres)');
     }
     const ssl = config.get('DATABASE_SSL') === 'true' ? true : undefined;
     const url = config.get<string>('DATABASE_URL');

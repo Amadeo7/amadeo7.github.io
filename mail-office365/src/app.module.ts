@@ -6,6 +6,7 @@ import { EmployeesModule } from './employees/employees.module';
 import { MailModule } from './mail/mail.module';
 import { ReceiptsModule } from './receipts/receipts.module';
 import { SftpModule } from './sftp/sftp.module';
+import { TemporalWorkerModule } from './temporal/temporal-worker.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { SftpModule } from './sftp/sftp.module';
     EmployeesModule,
     MailModule,
     ReceiptsModule,
+    TemporalWorkerModule,
   ],
 })
 export class AppModule {}

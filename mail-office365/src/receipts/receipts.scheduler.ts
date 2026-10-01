@@ -16,6 +16,8 @@ export class ReceiptsScheduler implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    // Con Temporal, la programación la lleva un Schedule (TEMPORAL_SCHEDULE_CRON), no este cron
+    if (this.config.get('TEMPORAL_ENABLED', 'false') === 'true') return;
     const expr = this.config.get<string>('RECEIPTS_CRON');
     if (!expr) return;
     const job = new CronJob(

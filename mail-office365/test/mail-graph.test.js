@@ -8,7 +8,7 @@ const { execFileSync } = require('node:child_process');
 const { SMTPServer } = require('smtp-server');
 const { simpleParser } = require('mailparser');
 const { config, pdf } = require('./helpers');
-const { MailService } = require('../dist/mail/mail.service');
+const { MailService, classifySmtpError, stableMessageId } = require('../dist/mail/mail.service');
 const { GraphVerifierService } = require('../dist/mail/graph-verifier.service');
 const { ReceiptEmailTemplate } = require('../dist/mail/receipt-email.template');
 
@@ -20,8 +20,18 @@ before(async () => {
     key: fs.readFileSync(`${dir}/k.pem`), cert: fs.readFileSync(`${dir}/c.pem`),
     onSecure(_s, _sess, cb) { sawTls = true; cb(); },
     onAuth(a, _s, cb) { a.username === 'nomina@empresa.com' && a.password === 'secreto' ? cb(null, { user: a.username }) : cb(new Error('535 5.7.139 credenciales')); },
-    onRcptTo(addr, _s, cb) { addr.address === 'rechazado@x.com' ? cb(new Error('550 buzón inexistente')) : cb(); },
-    onData(stream, _s, cb) { simpleParser(stream).then((m) => { received.push(m); cb(); }); },
+    onRcptTo(addr, _s, cb) {
+      if (addr.address === 'rechazado@x.com') return cb(new Error('550 buzón inexistente'));
+      if (addr.address === 'temporal@x.com') { const e = new Error('451 intenta más tarde'); e.responseCode = 451; return cb(e); }
+      cb();
+    },
+    onData(stream, _s, cb) {
+      simpleParser(stream).then((m) => {
+        if (m.subject === 'CORTAR') { for (const c of smtp.connections) c._socket.destroy(); return; }   // se cae la conexión a mitad del envío
+        if (m.subject === 'RECHAZAR-DATA') { const e = new Error('554 contenido rechazado'); e.responseCode = 554; return cb(e); }
+        received.push(m); cb();
+      });
+    },
   });
   await new Promise((r) => smtp.listen(0, '127.0.0.1', r));
   port = smtp.server.address().port;
@@ -81,4 +91,31 @@ test('Graph: token cacheado, filtro por Message-ID escapado, carpeta y buzón co
   assert.ok(seen.some((s) => s.includes('/users/nomina@empresa.com/mailFolders/sentitems/messages')));
   assert.ok(seen.some((s) => s.includes("it''s@x.com")));
   assert.equal(new GraphVerifierService(config({ AZURE_CLIENT_SECRET: undefined })).enabled, false);
+});
+
+test('clasificación de fallos SMTP: se sabe cuándo es seguro reintentar y cuándo es incierto', async () => {
+  const m = mailer();
+  const kind = (to, subject = 's') => m.send({ to, subject, html: 'h', text: 't', attachment: { filename: 'a.pdf', content: pdf() } }).then(() => 'ok', classifySmtpError);
+  assert.equal(await kind('ana@x.com'), 'ok');
+  assert.equal(await kind('rechazado@x.com'), 'definite_permanent');          // 550 en RCPT
+  assert.equal(await kind('temporal@x.com'), 'definite_transient');           // 451 en RCPT
+  assert.equal(await kind('ana@x.com', 'RECHAZAR-DATA'), 'definite_permanent'); // 554 después del contenido: respondió, no salió
+  assert.equal(await mailer('mala').send({ to: 'a@x.com', subject: 's', html: 'h', text: 't' }).then(() => 'ok', classifySmtpError), 'definite_permanent'); // 535
+  assert.equal(await kind('ana@x.com', 'CORTAR'), 'ambiguous');               // conexión cortada durante DATA: puede haber salido o no
+  const down = new MailService(config({ SMTP_HOST: '127.0.0.1', SMTP_PORT: 1, SMTP_USER: 'nomina@empresa.com', SMTP_PASS: 'x' }));
+  assert.equal(await down.send({ to: 'a@x.com', subject: 's', html: 'h', text: 't' }).then(() => 'ok', classifySmtpError), 'definite_transient'); // no conectó
+});
+
+test('Message-ID estable: mismo contenido, mismo identificador', () => {
+  assert.equal(stableMessageId('receipt', '00123-ab12', 'empresa.com'), '<receipt-00123-ab12@empresa.com>');
+  assert.equal(stableMessageId('report', 'run 1/2:3', 'x.com'), '<report-run123@x.com>');
+});
+
+test('varios destinatarios y copia: el reporte sale a todos', async () => {
+  const m = mailer();
+  await m.send({ to: ['a@x.com', 'b@x.com'], cc: ['c@x.com'], subject: 'Reporte', html: 'h', text: 't' });
+  const got = received.at(-1);
+  assert.deepEqual(got.to.value.map((v) => v.address), ['a@x.com', 'b@x.com']);
+  assert.deepEqual(got.cc.value.map((v) => v.address), ['c@x.com']);
+  assert.equal(got.attachments.length, 0);
 });
