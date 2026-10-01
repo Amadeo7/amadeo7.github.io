@@ -1,0 +1,34 @@
+# Desarrollo local: la app + PostgreSQL. Uso: docker compose up --build
+# Las variables ${...} se toman del archivo .env (con el valor por defecto indicado).
+services:
+  app:
+    build:
+      context: .
+      args:
+        NODE_VERSION: ${NODE_VERSION:-20}
+        PORT: ${PORT:-3000}
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-recibos}:${POSTGRES_PASSWORD:-recibos}@db:5432/${POSTGRES_DB:-recibos}
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:${POSTGRES_VERSION:-16}-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-recibos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recibos}
+      POSTGRES_DB: ${POSTGRES_DB:-recibos}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recibos} -d ${POSTGRES_DB:-recibos}"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:

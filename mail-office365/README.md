@@ -1,22 +1,48 @@
 # mail-office365
 
-API NestJS que envía correos con un PDF adjunto usando una cuenta de Office 365 (SMTP).
-Explicación visual del funcionamiento: [`docs/como-funciona.html`](docs/como-funciona.html).
+Servicio NestJS que lee recibos de pago en PDF desde una carpeta SFTP y envía cada uno por correo (Office 365) al empleado correspondiente. Registra cada envío en PostgreSQL y, si se configura, verifica que el correo quedó en "Elementos enviados".
 
-## Uso
+Especificación completa: [`SPEC.md`](SPEC.md).
+
+## Flujo
+
+1. Lee todos los archivos de `SFTP_DIR`.
+2. Del nombre `Recibo de pago <NNNNN>.pdf` extrae el código de empleado.
+3. Descarga la colección de empleados desde la API y busca nombre y correo por código.
+4. Envía un correo HTML con el PDF adjunto.
+5. Guarda el resultado en la tabla `receipt_emails`.
+6. Mueve el PDF a `procesados/<AAAA-MM-DD>/` en el SFTP, con fecha, hora y hash en el nombre.
+7. Verifica en Elementos enviados (Microsoft Graph) y marca `verified`.
+
+## Ejecutar
 
 ```bash
-npm install
-cp .env.example .env   # completa SMTP_USER / SMTP_PASS / MAIL_FROM
-npm run start:dev
-
-curl -X POST http://localhost:3000/mail/send \
-  -F "to=cliente@ejemplo.com" \
-  -F "subject=Factura" \
-  -F "body=Adjunto la factura." \
-  -F "file=@factura.pdf;type=application/pdf"
+cp .env.example .env     # completa los valores
+docker compose up --build
 ```
 
-Campos: `to` (uno o varios separados por coma), `cc` (opcional), `subject`, `body`, `file` (PDF).
+Sin Docker: `npm install && npm run start:dev` (requiere PostgreSQL y `DATABASE_URL`).
 
-> El endpoint no incluye autenticación: protégelo antes de exponerlo.
+## Configuración
+
+Todo es configurable en `.env`; `.env.example` lista cada variable con su valor por defecto (patrón del nombre de archivo, carpetas SFTP, campos de la API, plantilla y asunto del correo, URLs de Graph, nombre de la tabla, etc.).
+
+## Endpoints (header `x-api-key: <API_KEY>`)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/receipts/process` | Inicia el proceso en segundo plano (202). 409 si ya hay uno corriendo |
+| GET | `/receipts/status` | Estado y resumen de la última ejecución |
+| GET | `/receipts?status=&verified=&limit=` | Consulta la tabla de envíos |
+
+También puede correr solo con `RECEIPTS_CRON` (6 campos, con segundos), por ejemplo `0 0 8 * * 1-5`.
+
+## Comportamiento a tener en cuenta
+
+- **Dos envíos al mes con el mismo nombre de archivo**: cada uno se envía como envío distinto (la clave incluye el hash del contenido) y se archiva en una subcarpeta por fecha con nombre único, así ninguno se pierde ni se sobrescribe. La ruta final queda en `processed_path`.
+- **Sin duplicados**: la clave de un envío es nombre de archivo + hash del contenido. Un archivo ya enviado nunca se reenvía; uno con el mismo nombre pero otro contenido se trata como nuevo.
+- **Fallos**: empleado inexistente, sin correo, PDF inválido o error SMTP dejan el archivo en la carpeta y el registro en `failed`; se reintentan en la siguiente ejecución.
+- **Límite de Office 365**: ~30 correos por minuto por buzón; `SEND_DELAY_MS` (2500 ms por defecto) espacia los envíos.
+- **Verificación**: confirma que el mensaje aparece en Elementos enviados del remitente. No confirma que el destinatario lo recibió ni lo leyó. Requiere un registro de aplicación en Entra ID con permiso de aplicación `Mail.Read` (restringido al buzón con una Application Access Policy). Sin esas variables, los correos quedan `sent` con `verified = false`.
+- **SMTP con contraseña**: si el tenant lo bloquea (error `535 5.7.139`), hay que cambiar `MailService` a Microsoft Graph `sendMail`.
+- **Una sola instancia**: el control de ejecución simultánea es en memoria. No escales a varias réplicas sin agregar un lock en la base de datos.

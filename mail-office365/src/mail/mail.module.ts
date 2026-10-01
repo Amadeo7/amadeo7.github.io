@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
-import { MailController } from './mail.controller';
+import { GraphVerifierService } from './graph-verifier.service';
 import { MailService } from './mail.service';
+import { ReceiptEmailTemplate } from './receipt-email.template';
 
 @Module({
-  controllers: [MailController],
-  providers: [MailService],
+  providers: [MailService, GraphVerifierService, ReceiptEmailTemplate],
+  exports: [MailService, GraphVerifierService, ReceiptEmailTemplate],
 })
 export class MailModule {}
