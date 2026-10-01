@@ -5,7 +5,7 @@
 Servicio NestJS que:
 1. Lee todos los archivos de una carpeta SFTP.
 2. Por cada archivo `Recibo de pago <NNNNN>.pdf` extrae `NNNNN` (código de empleado).
-3. Busca ese código en la colección de empleados obtenida de una API REST y toma nombre y correo.
+3. Consulta una API REST **por ese código de empleado** (una llamada por archivo) y toma nombre y correo.
 4. Envía un correo por archivo, con cuerpo HTML y el PDF adjunto, usando una cuenta de Office 365 (SMTP).
 5. Registra cada envío en una tabla de PostgreSQL.
 6. Mueve el PDF enviado a una carpeta del SFTP para indicar que se procesó.
@@ -43,7 +43,7 @@ Grupos (detalle y defaults en `.env.example`):
 - **HTTP/ejecución**: `PORT`, `API_KEY`, `RECEIPTS_CRON`, `TZ`, `LIST_DEFAULT_LIMIT`, `LIST_MAX_LIMIT`.
 - **Archivos**: `RECEIPT_FILENAME_REGEX` (primer grupo de captura = código de empleado; se valida al arrancar), `MAX_PDF_MB`.
 - **SFTP**: `SFTP_HOST/PORT/USER/PASSWORD/PRIVATE_KEY_PATH/PASSPHRASE/HOST_SHA256/READY_TIMEOUT_MS`, `SFTP_DIR`, `SFTP_PROCESSED_DIR`.
-- **Empleados**: `EMPLOYEES_API_URL/TOKEN/AUTH_HEADER/AUTH_SCHEME/TIMEOUT_MS/ARRAY_PATH`, `EMPLOYEES_FIELD_CODE/NAME/EMAIL`.
+- **Empleados** (consulta por código): `EMPLOYEES_API_URL` (con `{code}`), `EMPLOYEES_API_TOKEN/AUTH_HEADER/AUTH_SCHEME/TIMEOUT_MS/STRIP_ZEROS/NOT_FOUND_STATUS/RESPONSE_PATH/MAX_CONSECUTIVE_ERRORS`, `EMPLOYEES_FIELD_CODE/NAME/EMAIL`.
 - **SMTP**: `SMTP_HOST/PORT/SECURE/REQUIRE_TLS/TLS_MIN_VERSION/USER/PASS`, `MAIL_FROM`, `SEND_DELAY_MS`.
 - **Contenido**: `MAIL_SUBJECT`, `COMPANY_NAME`, `MAIL_DEFAULT_NAME`, `MAIL_TEMPLATE_HTML_PATH`, `MAIL_TEMPLATE_TEXT_PATH`.
 - **Graph (verificación)**: `AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET/AUTH_URL`, `GRAPH_BASE_URL/SCOPE/MAILBOX/SENT_FOLDER/TIMEOUT_MS`, `VERIFY_MAX_ATTEMPTS`, `VERIFY_BATCH_SIZE`.
@@ -62,13 +62,19 @@ Regex de `RECEIPT_FILENAME_REGEX` (default `^Recibo de pago (\d+)\.pdf$`, insens
 - `download(name)`: devuelve `Buffer`.
 - `archive(name, sha256)`: mueve el archivo a `<SFTP_PROCESSED_DIR>/<AAAA-MM-DD>/<nombre sin .pdf>_<AAAAMMDD-HHmmss>_<hash8>.pdf` (fecha y hora en la zona `TZ`), creando las carpetas si no existen. Si el destino ya existiera se añade `_2`, `_3`… Así dos envíos del mismo empleado con el **mismo nombre de archivo** (p. ej. dos recibos por mes) nunca se sobrescriben ni se pierden. Devuelve la ruta final, que se guarda en `processed_path`. Un fallo al mover se registra como advertencia y **no** invalida el envío (el hash evita reenvíos y el movimiento se reintenta en la siguiente ejecución).
 
-### 5.3 Empleados
-- `GET EMPLOYEES_API_URL` una vez por ejecución, con `Authorization: Bearer <token>` si hay token, `Accept: application/json`, timeout configurable.
-- El arreglo está en la raíz del JSON o en la ruta con puntos de `EMPLOYEES_API_ARRAY_PATH` (p. ej. `data.items`). Si no es un arreglo, error.
-- Los nombres de campo se mapean con `EMPLOYEES_FIELD_*` (también admiten rutas con puntos).
-- Se indexa por código normalizado (sin espacios y sin ceros a la izquierda): `00123` y `123` coinciden.
-- **Supuestos**: la API devuelve todo en una sola respuesta (sin paginación) y usa Bearer. Si no es así hay que adaptar `EmployeesService.load`.
-- Si la API falla, la ejecución se aborta antes de enviar o marcar nada (`fatalError` en el resumen).
+### 5.3 Empleados (consulta por código)
+- **Una llamada a la API por archivo**, con el código extraído del nombre. No se descarga ninguna colección completa.
+- `EMPLOYEES_API_URL` lleva el marcador `{code}` (obligatorio, se valida al arrancar), que se reemplaza por el código codificado para URL. Ejemplos: `https://api.ejemplo.com/empleados/{code}` o `https://api.ejemplo.com/empleados?codigo={code}`.
+- Método `GET`, `Accept: application/json`, y `<EMPLOYEES_API_AUTH_HEADER>: <EMPLOYEES_API_AUTH_SCHEME> <token>` si hay token (esquema vacío = token tal cual). Timeout `EMPLOYEES_API_TIMEOUT_MS`.
+- El código se envía tal como viene en el archivo (`00123`). Con `EMPLOYEES_API_STRIP_ZEROS=true` se envía sin ceros a la izquierda.
+- La respuesta puede ser un objeto o un arreglo; `EMPLOYEES_API_RESPONSE_PATH` (ruta con puntos) indica dónde está. Los campos se mapean con `EMPLOYEES_FIELD_CODE/NAME/EMAIL`.
+- **Regla de seguridad**: si la respuesta trae un código de empleado y no coincide con el solicitado (comparando sin ceros a la izquierda), se descarta. Nunca se envía un recibo a un empleado cuyo código no coincide con el del archivo. Si la respuesta no incluye código, se acepta tal cual.
+- Resultados de cada consulta:
+  - Estado HTTP en `EMPLOYEES_API_NOT_FOUND_STATUS` (default `404`), o respuesta vacía → **empleado no encontrado**: registro `failed`, el archivo queda en origen.
+  - Cualquier otro error (red, timeout, 401/403/5xx, JSON inválido) → **API no disponible**: registro `failed` con el motivo, sin contar como intento de envío; se reintenta en la siguiente ejecución.
+  - Tras `EMPLOYEES_API_MAX_CONSECUTIVE_ERRORS` (default 5) fallos de API seguidos se **aborta la ejecución** (`fatalError`) para no saturar una API caída; los archivos restantes no se tocan.
+- Dentro de una ejecución, el resultado por código se guarda en memoria: si dos archivos son del mismo empleado, se consulta una sola vez.
+- **Supuestos**: la API acepta el código en la URL y devuelve JSON con código, nombre y correo. Si el esquema es distinto, ajustar `EmployeesService`.
 
 ### 5.4 Correo
 - Transporte SMTP: STARTTLS en 587, TLS >= 1.2.
@@ -118,14 +124,14 @@ Activa solo si están `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` y `AZURE_CLIENT_SECRE
 ## 6. Algoritmo de una ejecución
 
 1. Si ya hay una ejecución en curso → error 409.
-2. Cargar empleados (si falla, abortar).
+2. Preparar la consulta de empleados (caché en memoria de la ejecución).
 3. Abrir SFTP y listar archivos.
 4. Para cada archivo, en orden y secuencialmente:
    1. Parsear nombre; si no cumple, ignorar.
    2. Si `size > MAX_PDF_MB` → fallo. Descargar; si no empieza con `%PDF-` → fallo.
    3. Calcular SHA-256; `findOrCreate` (upsert) del registro.
    4. Si el registro ya está `sent`: contar como omitido, archivar el archivo, continuar.
-   5. Buscar empleado; si no existe o su correo no es válido → registro `failed` con el motivo (no cuenta como intento de envío) y el archivo se queda.
+   5. Consultar la API de empleados con el código (§5.3); si no existe o su correo no es válido → registro `failed` con el motivo (no cuenta como intento de envío) y el archivo se queda.
    6. Esperar `SEND_DELAY_MS` entre envíos reales (Office 365 limita ~30 correos/min por buzón).
    7. Enviar. Éxito → `status='sent'`, `message_id`, `sent_at`, `attempts+1`, `error=NULL`, y archivar. Error → `status='failed'`, `error`, `attempts+1`.
    8. Cualquier excepción por archivo se captura: no detiene el resto.
@@ -161,14 +167,15 @@ Ejecución automática: si `RECEIPTS_CRON` está definido (cron de 6 campos), se
 5. Una segunda ejecución no reenvía nada (`skippedAlreadySent` > 0).
 6. Empleado inexistente, sin correo, PDF inválido o error SMTP → registro `failed` con `error`, archivo intacto en origen, el resto de archivos se procesa.
 7. Archivos con nombre fuera del formato se ignoran y aparecen en `ignoredNames`.
-8. Si la API de empleados falla, no se envía ni registra nada y `lastRun.fatalError` lo indica.
+8. Cada archivo provoca una consulta a la API con su código (`.../empleados/00123`). Si la API responde 404 → `failed` "no encontrado". Si la API falla 5 veces seguidas → la ejecución se aborta y `lastRun.fatalError` lo indica; los registros afectados quedan `failed` sin contar intentos y se reenvían al recuperarse la API. Una respuesta con un código distinto al solicitado nunca genera un envío.
 9. Con credenciales Graph, los registros enviados pasan a `verified = true` con `verified_at`; sin ellas permanecen `verified = false`.
 10. Dos disparos simultáneos de `POST /receipts/process` → el segundo recibe 409.
 11. Cambiar en `.env` el patrón de nombre, la tabla, la plantilla, el asunto o la cabecera de autenticación de la API modifica el comportamiento sin tocar el código.
 
 ## 10. Riesgos y decisiones abiertas
 
-- Forma real de la API de empleados (paginación, autenticación distinta de Bearer): hoy se asume lo de §5.3.
+- Forma real de la API de empleados (marcador `{code}` en URL, JSON con código/nombre/correo): hoy se asume lo de §5.3.
+- Una llamada por archivo: con muchos recibos la ejecución depende de la latencia de la API (se hace en serie, junto con la pausa de `SEND_DELAY_MS`).
 - SMTP con contraseña puede estar bloqueado en el tenant (`535 5.7.139`); alternativa: Graph `sendMail`, cambiando solo `MailService`.
 - Una sola instancia. Para varias réplicas, añadir lock en BD (`pg_advisory_lock`).
 - Los recibos contienen datos personales: usar SFTP con llave y huella de host, `DATABASE_SSL` en producción, y no registrar el contenido de los PDFs.

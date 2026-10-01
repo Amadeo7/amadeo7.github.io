@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 import { GraphVerifierService } from '../mail/graph-verifier.service';
 import { MailService } from '../mail/mail.service';
 import { ReceiptEmailTemplate } from '../mail/receipt-email.template';
-import { EmployeesService } from '../employees/employees.service';
+import { EmployeeApiError, EmployeesService } from '../employees/employees.service';
 import { SftpService, SftpSession } from '../sftp/sftp.service';
 import { compileReceiptRegex, DEFAULT_RECEIPT_FILENAME_REGEX, parseReceiptFilename } from './parse-receipt-filename';
 import { ReceiptsRepository } from './receipts.repository';
@@ -67,8 +67,9 @@ export class ReceiptsService {
     this.lastRun = summary;
 
     try {
-      // Si la API falla no se toca nada: no se envía ni se marca ningún archivo
-      const directory = await this.employees.load();
+      const lookup = this.employees.lookup();
+      const maxApiErrors = Number(this.config.get('EMPLOYEES_API_MAX_CONSECUTIVE_ERRORS', 5));
+      let apiErrors = 0;
       const session = await this.sftp.open();
       try {
         const files = await session.listFiles();
@@ -100,7 +101,16 @@ export class ReceiptsService {
               continue;
             }
 
-            const employee = directory.find(code);
+            let employee;
+            try {
+              employee = await lookup.find(code);
+              apiErrors = 0;
+            } catch (e) {
+              if (!(e instanceof EmployeeApiError)) throw e;
+              // La API no respondió: no es culpa del empleado, se reintenta en la siguiente ejecución
+              if (++apiErrors >= maxApiErrors) throw new RunAborted(`${e.message} (${apiErrors} fallos consecutivos)`);
+              throw new NoSend(e.message);
+            }
             if (!employee) throw new NoSend(`Empleado ${code} no encontrado en la API`);
             await this.repo.setEmployee(row.id, employee.name, employee.email);
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(employee.email)) {
@@ -125,6 +135,7 @@ export class ReceiptsService {
             summary.errors.push({ file: file.name, error: msg(e) });
             this.logger.error(`${file.name}: ${msg(e)}`);
             if (rowId) await this.repo.markFailed(rowId, msg(e), !(e instanceof NoSend)).catch(() => undefined);
+            if (e instanceof RunAborted) throw e;
           }
         }
       } finally {
@@ -176,3 +187,6 @@ export class ReceiptsService {
 
 /** Fallo de datos (no se llegó a enviar): no cuenta como intento de envío. */
 class NoSend extends Error {}
+
+/** Detiene toda la ejecución (p. ej. la API de empleados está caída). */
+class RunAborted extends NoSend {}
