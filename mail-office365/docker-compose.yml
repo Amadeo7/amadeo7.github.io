@@ -9,7 +9,10 @@ services:
         PORT: ${PORT:-3000}
     env_file: .env
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-recibos}:${POSTGRES_PASSWORD:-recibos}@db:5432/${POSTGRES_DB:-recibos}
+      # Dentro de la red de compose la base se alcanza por el nombre del servicio
+      DB_HOST: db
+      DB_PORT: 5432
+      DATABASE_URL: ""
     ports:
       - "${PORT:-3000}:${PORT:-3000}"
     depends_on:
@@ -20,13 +23,13 @@ services:
   db:
     image: postgres:${POSTGRES_VERSION:-16}-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-recibos}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recibos}
-      POSTGRES_DB: ${POSTGRES_DB:-recibos}
+      POSTGRES_USER: ${DB_USER:-recibos}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-recibos}
+      POSTGRES_DB: ${DB_NAME:-recibos}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recibos} -d ${POSTGRES_DB:-recibos}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-recibos} -d ${DB_NAME:-recibos}"]
       interval: 5s
       retries: 10
 

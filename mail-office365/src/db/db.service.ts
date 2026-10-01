@@ -42,10 +42,21 @@ export class DbService implements OnModuleInit, OnModuleDestroy {
     if (!/^[a-z_][a-z0-9_]{0,62}$/.test(this.table)) {
       throw new Error('DB_TABLE solo admite minúsculas, dígitos y guion bajo (máx. 63 caracteres)');
     }
-    this.pool = new Pool({
-      connectionString: config.getOrThrow('DATABASE_URL'),
-      ssl: config.get('DATABASE_SSL') === 'true' ? true : undefined,
-    });
+    const ssl = config.get('DATABASE_SSL') === 'true' ? true : undefined;
+    const url = config.get<string>('DATABASE_URL');
+    // DATABASE_URL, si existe, tiene prioridad; si no, se arma con DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME
+    this.pool = new Pool(
+      url
+        ? { connectionString: url, ssl }
+        : {
+            host: config.get('DB_HOST', 'localhost'),
+            port: Number(config.get('DB_PORT', 5432)),
+            user: config.getOrThrow('DB_USER'),
+            password: config.get('DB_PASSWORD'),
+            database: config.getOrThrow('DB_NAME'),
+            ssl,
+          },
+    );
   }
 
   async onModuleInit() {

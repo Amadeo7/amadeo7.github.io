@@ -21,11 +21,18 @@ cp .env.example .env     # completa los valores
 docker compose up --build
 ```
 
-Sin Docker: `npm install && npm run start:dev` (requiere PostgreSQL y `DATABASE_URL`).
+Sin Docker: `npm install && npm run start:dev` (requiere PostgreSQL; configura `DB_HOST/PORT/USER/PASSWORD/NAME`).
+
+## Pruebas
+
+```bash
+npm test                                   # unitarias, API de empleados, SMTP con STARTTLS y Graph simulados
+TEST_DATABASE_URL=postgres://u:p@localhost:5432/recibos_test npm test   # además, el flujo completo con PostgreSQL
+```
 
 ## Configuración
 
-Todo es configurable en `.env`; `.env.example` lista cada variable con su valor por defecto (patrón del nombre de archivo, carpetas SFTP, campos de la API, plantilla y asunto del correo, URLs de Graph, nombre de la tabla, etc.).
+Todo es configurable en `.env`: servidores, IPs, puertos, usuarios, contraseñas y rutas de cada servicio (SFTP, API de empleados, SMTP, Graph, PostgreSQL y la propia app con `LISTEN_HOST`/`PORT`).  `.env.example` lista cada variable con su valor por defecto (patrón del nombre de archivo, carpetas SFTP, campos de la API, plantilla y asunto del correo, URLs de Graph, nombre de la tabla, etc.).
 
 ## Endpoints (header `x-api-key: <API_KEY>`)
 

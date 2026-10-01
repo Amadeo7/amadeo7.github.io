@@ -37,18 +37,20 @@ mail-office365/
 
 **Principio**: ningún valor parametrizable está fijo en el código. Todo se configura en `.env`; `.env.example` lista **todas** las variables con su valor por defecto y es la referencia. El código usa esos mismos defaults solo como respaldo.
 
-Obligatorias (la app falla al arrancar si faltan): `API_KEY`, `DATABASE_URL`, `SFTP_HOST`, `SFTP_USER`, `SFTP_DIR`, `EMPLOYEES_API_URL`, `SMTP_USER`, `SMTP_PASS` y una credencial SFTP (`SFTP_PASSWORD` o `SFTP_PRIVATE_KEY_PATH`).
+Obligatorias (la app falla al arrancar si faltan): `API_KEY`, `DB_USER` y `DB_NAME` (o `DATABASE_URL`), `SFTP_HOST`, `SFTP_USER`, `SFTP_DIR`, `EMPLOYEES_API_URL`, `SMTP_USER`, `SMTP_PASS` y una credencial SFTP (`SFTP_PASSWORD` o `SFTP_PRIVATE_KEY_PATH`).
+
+**Servidores, IPs, puertos, rutas y credenciales**: todos se leen de `.env`, sin excepción. Cada servicio tiene su host, puerto, usuario y contraseña propios: app (`LISTEN_HOST`, `PORT`, `API_KEY`), SFTP (`SFTP_HOST/PORT/USER/PASSWORD` o llave), API de empleados (URL, token o `EMPLOYEES_API_USER/PASSWORD`), SMTP (`SMTP_HOST/PORT/USER/PASS`), Graph/Entra ID (`AZURE_*`, `GRAPH_*`) y PostgreSQL (`DB_HOST/PORT/USER/PASSWORD/NAME`). Las rutas (`SFTP_DIR`, `SFTP_PROCESSED_DIR`, `SFTP_PRIVATE_KEY_PATH`, plantillas) también.
 
 Grupos (detalle y defaults en `.env.example`):
-- **HTTP/ejecución**: `PORT`, `API_KEY`, `RECEIPTS_CRON`, `TZ`, `LIST_DEFAULT_LIMIT`, `LIST_MAX_LIMIT`.
+- **HTTP/ejecución**: `LISTEN_HOST` (IP de escucha, default `0.0.0.0`), `PORT`, `API_KEY`, `RECEIPTS_CRON`, `TZ`, `LIST_DEFAULT_LIMIT`, `LIST_MAX_LIMIT`.
 - **Archivos**: `RECEIPT_FILENAME_REGEX` (primer grupo de captura = código de empleado; se valida al arrancar), `MAX_PDF_MB`.
 - **SFTP**: `SFTP_HOST/PORT/USER/PASSWORD/PRIVATE_KEY_PATH/PASSPHRASE/HOST_SHA256/READY_TIMEOUT_MS`, `SFTP_DIR`, `SFTP_PROCESSED_DIR`.
-- **Empleados** (consulta por código): `EMPLOYEES_API_URL` (con `{code}`), `EMPLOYEES_API_TOKEN/AUTH_HEADER/AUTH_SCHEME/TIMEOUT_MS/STRIP_ZEROS/NOT_FOUND_STATUS/RESPONSE_PATH/MAX_CONSECUTIVE_ERRORS`, `EMPLOYEES_FIELD_CODE/NAME/EMAIL`.
+- **Empleados** (consulta por código): `EMPLOYEES_API_URL` (con `{code}`), `EMPLOYEES_API_TOKEN/USER/PASSWORD/AUTH_HEADER/AUTH_SCHEME/TIMEOUT_MS/STRIP_ZEROS/NOT_FOUND_STATUS/RESPONSE_PATH/MAX_CONSECUTIVE_ERRORS`, `EMPLOYEES_FIELD_CODE/NAME/EMAIL`.
 - **SMTP**: `SMTP_HOST/PORT/SECURE/REQUIRE_TLS/TLS_MIN_VERSION/USER/PASS`, `MAIL_FROM`, `SEND_DELAY_MS`.
 - **Contenido**: `MAIL_SUBJECT`, `COMPANY_NAME`, `MAIL_DEFAULT_NAME`, `MAIL_TEMPLATE_HTML_PATH`, `MAIL_TEMPLATE_TEXT_PATH`.
 - **Graph (verificación)**: `AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET/AUTH_URL`, `GRAPH_BASE_URL/SCOPE/MAILBOX/SENT_FOLDER/TIMEOUT_MS`, `VERIFY_MAX_ATTEMPTS`, `VERIFY_BATCH_SIZE`.
-- **PostgreSQL**: `DATABASE_URL`, `DATABASE_SSL`, `DB_TABLE` (validada: minúsculas, dígitos y `_`, porque se interpola en el SQL).
-- **Docker**: `NODE_VERSION`, `POSTGRES_VERSION`, `POSTGRES_USER/PASSWORD/DB` (los usa `docker-compose.yml` con `${VAR:-default}`; `NODE_VERSION` y `PORT` también son `ARG` del Dockerfile).
+- **PostgreSQL**: `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` (por partes, para que la contraseña admita cualquier carácter), o `DATABASE_URL` que tiene prioridad si se define; `DATABASE_SSL`, `DB_TABLE` (validada: minúsculas, dígitos y `_`, porque se interpola en el SQL).
+- **Docker**: `NODE_VERSION`, `POSTGRES_VERSION`; el servicio `db` se crea con `DB_USER/DB_PASSWORD/DB_NAME` y la app se conecta a él por el nombre de servicio (`docker-compose.yml` con `${VAR:-default}`; `NODE_VERSION` y `PORT` también son `ARG` del Dockerfile).
 
 ## 5. Componentes
 
@@ -65,7 +67,7 @@ Regex de `RECEIPT_FILENAME_REGEX` (default `^Recibo de pago (\d+)\.pdf$`, insens
 ### 5.3 Empleados (consulta por código)
 - **Una llamada a la API por archivo**, con el código extraído del nombre. No se descarga ninguna colección completa.
 - `EMPLOYEES_API_URL` lleva el marcador `{code}` (obligatorio, se valida al arrancar), que se reemplaza por el código codificado para URL. Ejemplos: `https://api.ejemplo.com/empleados/{code}` o `https://api.ejemplo.com/empleados?codigo={code}`.
-- Método `GET`, `Accept: application/json`, y `<EMPLOYEES_API_AUTH_HEADER>: <EMPLOYEES_API_AUTH_SCHEME> <token>` si hay token (esquema vacío = token tal cual). Timeout `EMPLOYEES_API_TIMEOUT_MS`.
+- Método `GET`, `Accept: application/json`. Autenticación: con `EMPLOYEES_API_TOKEN`, `<EMPLOYEES_API_AUTH_HEADER>: <EMPLOYEES_API_AUTH_SCHEME> <token>` (esquema vacío = token tal cual); sin token pero con `EMPLOYEES_API_USER`/`EMPLOYEES_API_PASSWORD`, `Authorization: Basic`. Timeout `EMPLOYEES_API_TIMEOUT_MS`.
 - El código se envía tal como viene en el archivo (`00123`). Con `EMPLOYEES_API_STRIP_ZEROS=true` se envía sin ceros a la izquierda.
 - La respuesta puede ser un objeto o un arreglo; `EMPLOYEES_API_RESPONSE_PATH` (ruta con puntos) indica dónde está. Los campos se mapean con `EMPLOYEES_FIELD_CODE/NAME/EMAIL`.
 - **Regla de seguridad**: si la respuesta trae un código de empleado y no coincide con el solicitado (comparando sin ceros a la izquierda), se descarta. Nunca se envía un recibo a un empleado cuyo código no coincide con el del archivo. Si la respuesta no incluye código, se acepta tal cual.
@@ -160,6 +162,7 @@ Ejecución automática: si `RECEIPTS_CRON` está definido (cron de 6 campos), se
 
 ## 9. Criterios de aceptación
 
+0. `npm test` pasa (compila y corre las pruebas de `test/`). Las del flujo con PostgreSQL requieren `TEST_DATABASE_URL`; sin ella se omiten.
 1. `npm ci && npm run build` sin errores; `docker build` produce una imagen que arranca.
 2. Sin `API_KEY` la app no arranca; sin header correcto, 401.
 3. `Recibo de pago 123.pdf` coincide con el empleado `00123` de la API; llega un correo HTML con ese PDF adjunto al correo del empleado y se crea un registro `sent`.
@@ -170,7 +173,7 @@ Ejecución automática: si `RECEIPTS_CRON` está definido (cron de 6 campos), se
 8. Cada archivo provoca una consulta a la API con su código (`.../empleados/00123`). Si la API responde 404 → `failed` "no encontrado". Si la API falla 5 veces seguidas → la ejecución se aborta y `lastRun.fatalError` lo indica; los registros afectados quedan `failed` sin contar intentos y se reenvían al recuperarse la API. Una respuesta con un código distinto al solicitado nunca genera un envío.
 9. Con credenciales Graph, los registros enviados pasan a `verified = true` con `verified_at`; sin ellas permanecen `verified = false`.
 10. Dos disparos simultáneos de `POST /receipts/process` → el segundo recibe 409.
-11. Cambiar en `.env` el patrón de nombre, la tabla, la plantilla, el asunto o la cabecera de autenticación de la API modifica el comportamiento sin tocar el código.
+11. Cambiar en `.env` hosts, IPs, puertos, usuarios, contraseñas, rutas, el patrón de nombre, la tabla, la plantilla, el asunto o la cabecera de autenticación de la API modifica el comportamiento sin tocar el código.
 
 ## 10. Riesgos y decisiones abiertas
 

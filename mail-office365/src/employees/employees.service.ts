@@ -59,6 +59,7 @@ export class EmployeesService {
     const sendCode = this.config.get('EMPLOYEES_API_STRIP_ZEROS', 'false') === 'true' ? normalizeCode(code) : code;
     const url = this.urlTemplate.replace(/{code}/g, encodeURIComponent(sendCode));
     const token = this.config.get<string>('EMPLOYEES_API_TOKEN');
+    const user = this.config.get<string>('EMPLOYEES_API_USER');
     const authHeader = this.config.get<string>('EMPLOYEES_API_AUTH_HEADER', 'Authorization');
     const authScheme = this.config.get<string>('EMPLOYEES_API_AUTH_SCHEME', 'Bearer');
     const responsePath = this.config.get<string>('EMPLOYEES_API_RESPONSE_PATH', '');
@@ -69,7 +70,17 @@ export class EmployeesService {
     let res: Response;
     try {
       res = await fetch(url, {
-        headers: { Accept: 'application/json', ...(token ? { [authHeader]: authScheme ? `${authScheme} ${token}` : token } : {}) },
+        headers: {
+          Accept: 'application/json',
+          // Con token se usa EMPLOYEES_API_AUTH_HEADER/SCHEME; si no hay token pero sí usuario, Basic
+          ...(token
+            ? { [authHeader]: authScheme ? `${authScheme} ${token}` : token }
+            : user
+              ? {
+                  Authorization: `Basic ${Buffer.from(`${user}:${this.config.get('EMPLOYEES_API_PASSWORD', '')}`).toString('base64')}`,
+                }
+              : {}),
+        },
         signal: AbortSignal.timeout(Number(this.config.get('EMPLOYEES_API_TIMEOUT_MS', 30000))),
       });
     } catch (e) {

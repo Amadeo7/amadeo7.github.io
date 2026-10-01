@@ -7,7 +7,8 @@
     "build": "nest build",
     "start": "nest start",
     "start:dev": "nest start --watch",
-    "start:prod": "node dist/main"
+    "start:prod": "node dist/main",
+    "test": "nest build && node --test test/*.test.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",
@@ -29,6 +30,8 @@
     "@types/nodemailer": "^6.4.15",
     "@types/pg": "^8.11.6",
     "@types/ssh2-sftp-client": "^9.0.4",
-    "typescript": "^5.5.0"
+    "typescript": "^5.5.0",
+    "smtp-server": "^3.13.6",
+    "mailparser": "^3.7.1"
   }
 }
