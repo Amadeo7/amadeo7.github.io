@@ -1,0 +1,47 @@
+# Desarrollo local: la app + PostgreSQL. Uso: docker compose up --build
+# Las variables ${...} se toman del archivo .env (con el valor por defecto indicado).
+services:
+  app:
+    build:
+      context: .
+      args:
+        NODE_VERSION: ${NODE_VERSION:-20}
+        PORT: ${PORT:-3000}
+    env_file: .env
+    environment:
+      # Dentro de la red de compose la base se alcanza por el nombre del servicio
+      DB_HOST: db
+      DB_PORT: 5432
+      DATABASE_URL: ""
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:${POSTGRES_VERSION:-16}-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-recibos}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-recibos}
+      POSTGRES_DB: ${DB_NAME:-recibos}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-recibos} -d ${DB_NAME:-recibos}"]
+      interval: 5s
+      retries: 10
+
+  # Servidor Temporal de DESARROLLO (SQLite en memoria; en producción usa un cluster o Temporal Cloud).
+  # Actívalo con: docker compose --profile temporal up   y en .env: TEMPORAL_ENABLED=true TEMPORAL_ADDRESS=temporal:7233
+  temporal:
+    profiles: ["temporal"]
+    image: temporalio/temporal:${TEMPORAL_VERSION:-latest}
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--headless"]
+    ports:
+      - "${TEMPORAL_UI_PORT:-8233}:8233"
+      - "7233:7233"
+
+volumes:
+  pgdata:
