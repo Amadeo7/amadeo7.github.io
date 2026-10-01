@@ -8,7 +8,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
-    "test": "nest build && node --test test/*.test.js",
+    "test": "nest build && node --test --test-concurrency=1 test/*.test.js",
     "start:worker": "node dist/worker",
     "temporal:check": "node scripts/check-temporal.js"
   },
