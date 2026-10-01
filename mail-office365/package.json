@@ -9,7 +9,8 @@
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main",
     "test": "nest build && node --test test/*.test.js",
-    "start:worker": "node dist/worker"
+    "start:worker": "node dist/worker",
+    "temporal:check": "node scripts/check-temporal.js"
   },
   "dependencies": {
     "@nestjs/common": "^10.4.0",

@@ -62,7 +62,7 @@ Grupos (detalle y defaults en `.env.example`):
 - **Envíos a medias**: `UNCERTAIN_WINDOW_MIN`.
 - **Graph**: `AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET/AUTH_URL`, `GRAPH_BASE_URL/SCOPE/MAILBOX/SENT_FOLDER/TIMEOUT_MS`, `VERIFY_MAX_ATTEMPTS`, `VERIFY_BATCH_SIZE`.
 - **PostgreSQL**: `DB_HOST/PORT/USER/PASSWORD/NAME` o `DATABASE_URL` (prioridad), `DATABASE_SSL`, `DB_TABLE` (validada: minúsculas, dígitos y `_`, máx. 57 caracteres, porque se interpola en el SQL).
-- **Temporal**: `TEMPORAL_ENABLED`, `TEMPORAL_ADDRESS/NAMESPACE/TLS/API_KEY/TASK_QUEUE`, `TEMPORAL_WORKER_ENABLED`, `TEMPORAL_MAX_CONCURRENT_ACTIVITIES`, `TEMPORAL_ACTIVITIES_PER_SECOND`, `TEMPORAL_WORKFLOW_ID`, `TEMPORAL_SCHEDULE_ID`, `TEMPORAL_SCHEDULE_CRON`, `WORKFLOW_BATCH_SIZE`, `TEMPORAL_RETRY_ATTEMPTS/INITIAL_SECONDS/MAX_SECONDS`, `TEMPORAL_REPORT_RETRY_ATTEMPTS/INITIAL_SECONDS`.
+- **Temporal**: `TEMPORAL_ENABLED`, `TEMPORAL_ADDRESS/NAMESPACE/TLS/TLS_CA_PATH/TLS_CERT_PATH/TLS_KEY_PATH/TLS_SERVER_NAME/API_KEY/TASK_QUEUE`, `TEMPORAL_WORKER_ENABLED`, `TEMPORAL_MAX_CONCURRENT_ACTIVITIES`, `TEMPORAL_ACTIVITIES_PER_SECOND`, `TEMPORAL_WORKFLOW_ID`, `TEMPORAL_SCHEDULE_ID`, `TEMPORAL_SCHEDULE_CRON`, `WORKFLOW_BATCH_SIZE`, `TEMPORAL_RETRY_ATTEMPTS/INITIAL_SECONDS/MAX_SECONDS`, `TEMPORAL_REPORT_RETRY_ATTEMPTS/INITIAL_SECONDS`.
 - **Docker**: `NODE_VERSION`, `POSTGRES_VERSION`, `TEMPORAL_VERSION`, `TEMPORAL_UI_PORT`; el servicio `db` se crea con `DB_USER/DB_PASSWORD/DB_NAME`.
 
 ## 5. Componentes
@@ -183,6 +183,8 @@ La lógica de negocio vive en `ReceiptsService` (`listFiles`, `processFile`, `ve
 **Solapamiento**: `TEMPORAL_WORKFLOW_ID` fijo + política de conflicto por defecto: lanzar otra ejecución mientras corre una devuelve 409. El Schedule usa `overlap: SKIP`.
 
 **Programación**: `TEMPORAL_SCHEDULE_CRON` (cron de 5 campos, zona `TZ`) crea o actualiza el Schedule `TEMPORAL_SCHEDULE_ID` en cada arranque, así toma cambios de `.env`. Con Temporal activo se ignora `RECEIPTS_CRON`.
+
+**Conexión** (cliente y worker comparten `temporalConnectionOptions`, todo desde `.env`): `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, TLS simple (`TEMPORAL_TLS`), CA propia (`TEMPORAL_TLS_CA_PATH`), mTLS (`TEMPORAL_TLS_CERT_PATH` + `TEMPORAL_TLS_KEY_PATH`, siempre juntas), `TEMPORAL_TLS_SERVER_NAME` y `TEMPORAL_API_KEY` (Temporal Cloud; activa TLS). `npm run temporal:check` (`scripts/check-temporal.js`) valida la conexión, la versión del servidor, el namespace y el Schedule, con una pista de qué revisar si falla. Requisitos del servidor: el namespace debe existir; Schedules requieren servidor >= 1.18; el SDK es 1.24.0 y se probó contra un servidor 1.32.
 
 **Worker**: `TemporalWorkerService` (en el mismo proceso si `TEMPORAL_WORKER_ENABLED=true`) o proceso separado `npm run start:worker` (`src/worker.ts`, sin HTTP). Cola `TEMPORAL_TASK_QUEUE`, `maxConcurrentActivityTaskExecutions=1`. El workflow se empaqueta en el build (`dist/workflow-bundle.js`); si falta, el worker lo empaqueta al arrancar.
 

@@ -6,6 +6,7 @@ const { ReceiptEmailTemplate } = require('../dist/mail/receipt-email.template');
 const { SftpSession } = require('../dist/sftp/sftp.service');
 const { DbService } = require('../dist/db/db.service');
 const { buildRunReport } = require('../dist/receipts/report.template');
+const { temporalConnectionOptions } = require('../dist/temporal/temporal.client.service');
 
 test('nombre de archivo: extrae el código y rechaza lo demás', () => {
   const re = compileReceiptRegex(DEFAULT_RECEIPT_FILENAME_REGEX);
@@ -95,4 +96,30 @@ test('reporte: nombres de empleados, secciones, escape de HTML y correo omitible
   assert.ok(!sinCorreo.html.includes('luis@x.com') && !sinCorreo.text.includes('luis@x.com'));
   assert.ok(buildRunReport({ ...base, counters: { fatalError: 'API caída' } }).html.includes('La ejecución se detuvo'));
   assert.equal(buildRunReport({ ...base, rows: [row({})], counters: {} }).subject.includes('con problemas'), false);
+});
+
+test('Temporal: opciones de conexión (TLS simple, CA propia, mTLS, API key) salen del entorno', () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tls-'));
+  for (const [n, c] of [['ca.pem', 'CA'], ['cert.pem', 'CERT'], ['key.pem', 'KEY']]) fs.writeFileSync(path.join(dir, n), c);
+  const none = { TEMPORAL_ADDRESS: undefined, TEMPORAL_TLS: undefined, TEMPORAL_API_KEY: undefined, TEMPORAL_TLS_CA_PATH: undefined, TEMPORAL_TLS_CERT_PATH: undefined, TEMPORAL_TLS_KEY_PATH: undefined, TEMPORAL_TLS_SERVER_NAME: undefined };
+
+  let o = temporalConnectionOptions(config(none));
+  assert.deepEqual([o.address, o.tls, o.apiKey], ['localhost:7233', undefined, undefined], 'por defecto: local y sin TLS');
+
+  o = temporalConnectionOptions(config({ ...none, TEMPORAL_ADDRESS: 'temporal.interno:7233', TEMPORAL_TLS: 'true' }));
+  assert.equal(o.address, 'temporal.interno:7233'); assert.ok(o.tls); assert.equal(o.tls.clientCertPair, undefined);
+
+  o = temporalConnectionOptions(config({ ...none, TEMPORAL_TLS_CA_PATH: path.join(dir, 'ca.pem'), TEMPORAL_TLS_SERVER_NAME: 'temporal.empresa.com' }));
+  assert.equal(o.tls.serverRootCACertificate.toString(), 'CA'); assert.equal(o.tls.serverNameOverride, 'temporal.empresa.com');
+
+  o = temporalConnectionOptions(config({ ...none, TEMPORAL_TLS_CERT_PATH: path.join(dir, 'cert.pem'), TEMPORAL_TLS_KEY_PATH: path.join(dir, 'key.pem') }));
+  assert.deepEqual([o.tls.clientCertPair.crt.toString(), o.tls.clientCertPair.key.toString()], ['CERT', 'KEY'], 'mTLS: certificado y llave de cliente');
+
+  o = temporalConnectionOptions(config({ ...none, TEMPORAL_API_KEY: 'k' }));
+  assert.ok(o.tls, 'la API key activa TLS'); assert.equal(o.apiKey, 'k');
+
+  assert.throws(() => temporalConnectionOptions(config({ ...none, TEMPORAL_TLS_CERT_PATH: path.join(dir, 'cert.pem') })), /juntas/);
+  assert.throws(() => temporalConnectionOptions(config({ ...none, TEMPORAL_TLS_CA_PATH: '/no/existe.pem' })), /ENOENT/);
+  config(none);
 });

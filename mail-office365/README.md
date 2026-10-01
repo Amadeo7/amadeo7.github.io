@@ -54,6 +54,8 @@ Con `TEMPORAL_ENABLED=true` cada ejecución es un workflow de Temporal: si el wo
 - **Un workflow por ejecución, no uno por correo.** Cada archivo es una *activity*. Un workflow por envío solo añadiría carga y complejidad: el detalle de cada envío ya está en PostgreSQL.
 - Cada `WORKFLOW_BATCH_SIZE` archivos el workflow continúa como uno nuevo para mantener acotado su historial.
 - El ritmo (límite de ~30 correos/min de Office 365) lo marca una pausa durable entre envíos (`SEND_DELAY_MS`).
+- **Conectar a tu servidor**: define `TEMPORAL_ADDRESS` (host:puerto del frontend, normalmente 7233) y `TEMPORAL_NAMESPACE` (debe existir). Si usa TLS: `TEMPORAL_TLS=true`; con CA interna `TEMPORAL_TLS_CA_PATH`; si exige certificado de cliente (mTLS) `TEMPORAL_TLS_CERT_PATH` y `TEMPORAL_TLS_KEY_PATH`; y `TEMPORAL_TLS_SERVER_NAME` si el nombre del certificado no coincide con el host. Para Temporal Cloud, `TEMPORAL_API_KEY` y el namespace `<nombre>.<id-de-cuenta>`. La máquina o contenedor de la app debe alcanzar ese puerto.
+- **Comprobar la conexión sin ejecutar nada**: `npm run temporal:check` (tras `npm run build`) lee el `.env`, se conecta y confirma versión del servidor, namespace y Schedule; si falla, indica qué revisar.
 - El worker corre en el mismo proceso o aparte (`npm run start:worker`, con `TEMPORAL_WORKER_ENABLED=false` en la API).
 - Servidor de desarrollo: `docker compose --profile temporal up` (con `TEMPORAL_ADDRESS=temporal:7233`). En producción usa un cluster propio o Temporal Cloud.
 - **Costo**: hay que operar un servidor Temporal con su persistencia y versionar los workflows al cambiarlos. Si no ya tienes uno, el modo sin Temporal da el mismo comportamiento funcional.

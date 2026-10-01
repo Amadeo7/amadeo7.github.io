@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { readFileSync } from 'fs';
 import {
   Client,
   Connection,
@@ -11,13 +12,30 @@ import {
 import { WORKFLOW_NAME } from './temporal.constants';
 import type { RunInput } from './activities.types';
 
-/** Conexión de Temporal compartida por cliente y worker (dirección, namespace, TLS, API key). */
+/**
+ * Opciones de conexión compartidas por cliente y worker, todas desde el entorno:
+ * dirección, TLS simple, CA propia, mTLS (certificado de cliente) y API key (Temporal Cloud).
+ */
 export function temporalConnectionOptions(config: ConfigService) {
-  const apiKey = config.get<string>('TEMPORAL_API_KEY');
+  const apiKey = config.get<string>('TEMPORAL_API_KEY') || undefined;
+  const caPath = config.get<string>('TEMPORAL_TLS_CA_PATH');
+  const certPath = config.get<string>('TEMPORAL_TLS_CERT_PATH');
+  const keyPath = config.get<string>('TEMPORAL_TLS_KEY_PATH');
+  const serverName = config.get<string>('TEMPORAL_TLS_SERVER_NAME');
+  if (!!certPath !== !!keyPath) {
+    throw new Error('TEMPORAL_TLS_CERT_PATH y TEMPORAL_TLS_KEY_PATH deben definirse juntas (mTLS)');
+  }
+  const useTls = config.get('TEMPORAL_TLS', 'false') === 'true' || !!(apiKey || caPath || certPath || serverName);
   return {
     address: config.get<string>('TEMPORAL_ADDRESS', 'localhost:7233'),
-    tls: config.get('TEMPORAL_TLS', 'false') === 'true' || apiKey ? ({} as const) : undefined,
-    apiKey: apiKey || undefined,
+    tls: useTls
+      ? {
+          serverNameOverride: serverName || undefined,
+          serverRootCACertificate: caPath ? readFileSync(caPath) : undefined,
+          clientCertPair: certPath && keyPath ? { crt: readFileSync(certPath), key: readFileSync(keyPath) } : undefined,
+        }
+      : undefined,
+    apiKey,
   };
 }
 
