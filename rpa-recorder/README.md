@@ -14,6 +14,11 @@ npm run record -- bac_login --url https://www.sucursalelectronica.com/redir/show
 PASS='tu-clave' npm run play -- flows/bac_login.json --type-delay 70 --out salida.json
 ```
 
+## Como saber que esta grabando
+- En el navegador veras una etiqueta roja **"● REC n"** arriba a la derecha; se pone verde un instante en cada accion capturada y `n` sube.
+- En la terminal aparece una linea `+ click ...` / `+ fill ...` por cada paso.
+- Para terminar: cierra la ventana del navegador (o Ctrl+C en la terminal). Recien ahi se guarda `flows/<nombre>.json`.
+
 ## Como graba
 - Cada elemento se guarda con **varios selectores** ordenados del mas estable al menos estable
   (`data-testid`, `id` no dinamico, `name`, `aria-label`, `placeholder`, texto del boton, css path).

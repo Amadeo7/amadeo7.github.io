@@ -57,8 +57,9 @@ async function main() {
       log: (m) => console.log(m),
       ...browserOpts(args.flags),
     });
-    console.log('Grabando... usa el navegador normalmente. Cierra la ventana para terminar.');
-    console.log('Alt+Click = extraer dato.');
+    console.log('Grabando... veras una etiqueta roja "REC n" arriba a la derecha del navegador (se pone verde en cada accion).');
+    console.log('Usa el navegador normalmente. Cierra la ventana (o Ctrl+C aqui) para terminar y guardar.');
+    console.log('Alt+Click = marcar un dato a extraer.');
     process.once('SIGINT', () => void rec.stop());
     const flow = await rec.closed;
     const file = join('flows', `${name}.json`);

@@ -7,7 +7,29 @@ export const INJECT_SCRIPT = String.raw`
   if (window.__rpaInjected) return;
   window.__rpaInjected = true;
 
-  const send = (ev) => { try { window.__rpaRecord(ev); } catch (e) {} };
+  let badge = null;
+  let count = 0;
+  function showBadge() {
+    if (window !== window.top || badge) return;
+    badge = document.createElement('div');
+    badge.setAttribute('data-rpa-badge', '1');
+    badge.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483647;background:#dc2626;color:#fff;' +
+      'font:600 12px/1 system-ui,sans-serif;padding:7px 10px;border-radius:999px;pointer-events:none;' +
+      'box-shadow:0 2px 8px rgba(0,0,0,.35);transition:background .15s';
+    badge.textContent = '\u25CF REC 0';
+    (document.body || document.documentElement).appendChild(badge);
+  }
+  function flash() {
+    count++;
+    if (!badge) return;
+    badge.textContent = '\u25CF REC ' + count;
+    badge.style.background = '#16a34a';
+    setTimeout(() => { if (badge) badge.style.background = '#dc2626'; }, 250);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', showBadge);
+  else showBadge();
+
+  const send = (ev) => { flash(); try { window.__rpaRecord(ev); } catch (e) {} };
   const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const dynamicId = (id) =>
     /\d{4,}/.test(id) || /[0-9a-f]{8}-[0-9a-f]{4}/i.test(id) || /^(:r|ember|react|mui-|rc_|__)/i.test(id);
