@@ -1,0 +1,12 @@
+{
+  "name": "bac_login",
+  "recordedAt": "2026-10-03T00:00:00.000Z",
+  "startUrl": "https://www.sucursalelectronica.com/redir/showLogin.go",
+  "requiredVars": ["BAC_USER", "BAC_PASSWORD"],
+  "steps": [
+    { "type": "goto", "url": "https://www.sucursalelectronica.com/redir/showLogin.go" },
+    { "type": "fill", "target": { "candidates": ["input[type=\"text\"]:visible"] }, "value": "{{BAC_USER}}" },
+    { "type": "fill", "target": { "candidates": ["[id=\"pass\"]"] }, "value": "{{BAC_PASSWORD}}", "secret": true },
+    { "type": "click", "target": { "candidates": ["button:text-is(\"Ingresar\")"] } }
+  ]
+}
